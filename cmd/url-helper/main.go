@@ -1,9 +1,14 @@
 package main
 
 import (
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"log/slog"
+	"net/http"
 	"os"
 	"url-helper/internal/config"
+	"url-helper/internal/http-server/handers/url/save"
+	mwLogger "url-helper/internal/http-server/middlware/logger"
 	"url-helper/internal/lib/logger/sl"
 	"url-helper/internal/storage/sqlite"
 )
@@ -26,19 +31,32 @@ func main() {
 		os.Exit(1)
 	}
 
-	id, err := storage.SaveURL("https://google.com", "google")
-	if err != nil {
-		log.Error("failed to save url", sl.Err(err))
-		os.Exit(1)
-	}
-	id, err = storage.SaveURL("https://google.com", "google")
-	if err != nil {
-		log.Error("failed to save url", sl.Err(err))
-		os.Exit(1)
-	}
-	log.Info("url successful saved", slog.Int64("id", id))
+	//_ = storage
 
-	_ = storage
+	router := chi.NewRouter()
+
+	router.Use(middleware.RequestID)
+	router.Use(mwLogger.New(log))
+	router.Use(middleware.Recoverer)
+	router.Use(middleware.URLFormat)
+
+	router.Post("/url", save.New(log, storage))
+
+	log.Info("starting server", slog.String("address", cfg.Address))
+
+	srv := &http.Server{
+		Addr:         cfg.Address,
+		Handler:      router,
+		ReadTimeout:  cfg.HTTPServer.Timeout,
+		WriteTimeout: cfg.HTTPServer.Timeout,
+		IdleTimeout:  cfg.HTTPServer.IdleTimeout,
+	}
+
+	if err := srv.ListenAndServe(); err != nil {
+		log.Error("failed to start server", sl.Err(err))
+	}
+
+	log.Error("server stopped")
 }
 
 func setupLogger(env string) *slog.Logger {
